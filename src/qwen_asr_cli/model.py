@@ -13,6 +13,7 @@ ASR_MODEL = "Qwen/Qwen3-ASR-1.7B-hf"
 ASR_REVISION = "bcd2b5b7f32b480ab5790554cfa8347f246a14f3"
 ALIGNER_MODEL = "Qwen/Qwen3-ForcedAligner-0.6B-hf"
 ALIGNER_REVISION = "c07281df297b9905d24a508279258cccf987a064"
+FLASH_KERNEL = "kernels-community/flash-attn2@c3f3c93a4a39e3d2cf49c13eac49229bc726ea13"
 ALIGNER_LANGUAGES = {
     "Chinese", "English", "Cantonese", "French", "German", "Italian",
     "Japanese", "Korean", "Portuguese", "Russian", "Spanish",
@@ -46,8 +47,18 @@ def alignment_language(language: str | None) -> str | None:
 
 
 class NativeQwen:
-    def __init__(self, offline: bool = False, progress=lambda message: None):
+    def __init__(self, offline: bool = False, progress=lambda message: None, attention="sdpa"):
+        if attention not in {"sdpa", "flash_attention_2"}:
+            raise ModelError(f"Unsupported attention backend: {attention}")
+        self.attention = FLASH_KERNEL if attention == "flash_attention_2" else "sdpa"
         self.local = configure_runtime(offline)
+        if attention == "flash_attention_2":
+            from .flash import prepare_flash_kernel
+
+            try:
+                prepare_flash_kernel(offline)
+            except (ImportError, OSError, RuntimeError, ValueError) as exc:
+                raise ModelError(f"FlashAttention kernel preparation failed: {exc}") from exc
         self.offline = offline
         self.progress = progress
         self.aligner = None
@@ -71,12 +82,12 @@ class NativeQwen:
         except (RuntimeError, AssertionError) as exc:
             raise ModelError(f"CUDA initialization failed: {exc}") from exc
         suffix = " from cache only" if offline else ""
-        progress(f"Loading {ASR_MODEL} on CUDA (BF16, SDPA){suffix}…")
+        progress(f"Loading {ASR_MODEL} on CUDA (BF16, {attention}){suffix}…")
         try:
             self.processor = AutoProcessor.from_pretrained(ASR_MODEL, **self._options(ASR_REVISION))
             self.model = AutoModelForMultimodalLM.from_pretrained(
                 ASR_MODEL, **self._options(ASR_REVISION), dtype=torch.bfloat16,
-                device_map="cuda", attn_implementation="sdpa",
+                device_map="cuda", attn_implementation=self.attention,
             ).eval()
         except (ImportError, OSError, RuntimeError, ValueError) as exc:
             raise ModelError(self._load_error(ASR_MODEL, exc)) from exc
@@ -114,7 +125,7 @@ class NativeQwen:
     def _load_aligner(self) -> None:
         if self.aligner is not None:
             return
-        self.progress(f"Loading {ALIGNER_MODEL} on CUDA (BF16, SDPA)…")
+        self.progress(f"Loading {ALIGNER_MODEL} on CUDA (BF16, {self.attention})…")
         try:
             from transformers import AutoModelForTokenClassification, AutoProcessor
 
@@ -123,7 +134,7 @@ class NativeQwen:
             )
             self.aligner = AutoModelForTokenClassification.from_pretrained(
                 ALIGNER_MODEL, **self._options(ALIGNER_REVISION), dtype=self.torch.bfloat16,
-                device_map="cuda", attn_implementation="sdpa",
+                device_map="cuda", attn_implementation=self.attention,
             ).eval()
         except (ImportError, OSError, RuntimeError, ValueError) as exc:
             raise ModelError(self._load_error(ALIGNER_MODEL, exc)) from exc

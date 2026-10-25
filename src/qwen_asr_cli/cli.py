@@ -50,6 +50,8 @@ def parser() -> argparse.ArgumentParser:
         description="Transcribe one local audio/video file with Qwen3-ASR on NVIDIA CUDA."
     )
     result.add_argument("media", type=Path, help="local audio or video file")
+    result.add_argument("--attention", choices=["sdpa", "flash_attention_2"], default="sdpa",
+                        help="attention backend (default: sdpa; FlashAttention needs flash extras)")
     result.add_argument(
         "--timestamps", action="store_true", help="add forced-aligned segment start/end times"
     )
@@ -106,7 +108,10 @@ def transcribe_to_file(args, source: Path, directory: Path, staged: Path) -> Non
             if model is None:
                 from .model import NativeQwen
 
-                model = NativeQwen(offline=args.offline, progress=progress)
+                options = {"offline": args.offline, "progress": progress}
+                if args.attention != "sdpa":
+                    options["attention"] = args.attention
+                model = NativeQwen(**options)
             transcript = model.transcribe(chunk.samples, args.language, args.max_new_tokens)
             if not transcript.text:
                 continue

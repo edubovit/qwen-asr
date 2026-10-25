@@ -12,6 +12,7 @@ from qwen_asr_cli.errors import ModelError, TranscriptionError
 
 @pytest.fixture
 def fake_libraries(monkeypatch):
+    monkeypatch.setattr("qwen_asr_cli.flash.prepare_flash_kernel", lambda offline: None)
     calls = []
 
     class Batch(dict):
@@ -116,6 +117,19 @@ def test_forced_language_survives_missing_decoded_language(fake_libraries):
     }
     result = adapter.transcribe(np.ones(16000, dtype=np.float32), "Russian", 1024)
     assert result == model.Transcript("Привет.", "Russian")
+
+
+def test_flash_attention_is_pinned_and_used_by_both_models(fake_libraries):
+    adapter = model.NativeQwen(attention="flash_attention_2")
+    adapter._load_aligner()
+    options = [kwargs for name, kwargs in fake_libraries.calls if name.endswith("model")]
+    assert len(options) == 2
+    assert all(item["attn_implementation"] == model.FLASH_KERNEL for item in options)
+
+
+def test_invalid_attention_fails_before_loading():
+    with pytest.raises(ModelError, match="Unsupported attention"):
+        model.NativeQwen(attention="other")
 
 
 def test_generation_at_cap_raises_even_if_last_token_is_eos(fake_libraries):

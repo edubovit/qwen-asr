@@ -1,5 +1,33 @@
 # Local Qwen ASR
 
+## Experimental FlashAttention 2 branch
+
+This branch adds `--attention flash_attention_2`; SDPA remains the default. It pins
+PyTorch 2.10.0/CUDA 12.8 and Hugging Face `kernels` 0.17.2. Use the isolated setup
+below rather than `setup.cmd` if you want to preserve the existing `.venv`:
+
+```powershell
+.\setup-flash.cmd
+.\.local\venv-flash\Scripts\python.exe -m qwen_asr_cli "recording.mp4" --attention flash_attention_2
+```
+
+The Windows build is pinned to `kernels-community/flash-attn2` model-repository
+revision `c3f3c93a4a39e3d2cf49c13eac49229bc726ea13`. The newer kernel-type repository
+does not carry that Windows build. This branch downloads only the matching
+`torch210-cu128-x86_64-windows` build and uses the kernels library's local override.
+Its older metadata is adapted in a separate local copy for the current loader;
+the CUDA binary is unchanged and its SHA-256 is checked against the pinned Hub artifact.
+Run from the checkout's drive; the local-override syntax requires a relative Windows path.
+This is executable third-party kernel code, not a model weight. SDPA does not load it.
+Use `--offline` after the model and kernel have both been cached.
+
+`scripts/benchmark_attention.py` prepares local audio and compares selectable backends
+with identical chunking, BF16, greedy generation, and token limits. Results and private
+transcripts go only under `.local/benchmark-attention`. It reports decoding, model
+loading, warmed inference, peak GPU allocation, and observed attention operators
+separately. A changed transcript is not proof of better or worse accuracy without a
+human reference. Do not compare different PyTorch versions as if only attention changed.
+
 Native Windows CLI for local Russian/English audio and video transcription with Qwen3-ASR 1.7B. Uses an NVIDIA CUDA GPU. No WSL, Docker, web server, or cloud transcription.
 
 ## Setup
