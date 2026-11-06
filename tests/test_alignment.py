@@ -67,6 +67,50 @@ def test_empty_alignment():
         aligned_segments("", [Word("invented", 0, 1)], 1, 0)
 
 
+def test_collapsed_word_before_pause_merges_forward():
+    text = "This is speech. Yes. More words here."
+    words = [
+        Word("This", 0.48, 0.64), Word("is", 0.64, 0.88), Word("speech", 0.88, 1.36),
+        Word("Yes", 2.4, 2.4), Word("More", 3.12, 3.2), Word("words", 3.2, 3.44),
+        Word("here", 3.44, 3.84),
+    ]
+    result = aligned_segments(text, words, 5.23, 77.71)
+    assert [segment.text for segment in result] == ["This is speech.", "Yes. More words here."]
+    assert result[1].start == pytest.approx(80.11)
+    assert result[1].end == pytest.approx(81.55)
+    assert " ".join(segment.text for segment in result) == text
+
+
+def test_leading_collapsed_words_wait_for_timed_word():
+    result = aligned_segments(
+        "One. Two. Three.",
+        [Word("One", 0.2, 0.2), Word("Two", 0.2, 0.2), Word("Three", 1, 1.5)], 2, 0,
+    )
+    assert result == [Segment("One. Two. Three.", 0.2, 1.5)]
+
+
+@pytest.mark.parametrize("tail_start,tail_end", [(2.5, 2.5), (3.04, 3.04)])
+def test_collapsed_tail_merges_backward_including_clamping(tail_start, tail_end):
+    result = aligned_segments(
+        "First. Second. Last.",
+        [Word("First", 0, 1), Word("Second", 1, 2), Word("Last", tail_start, tail_end)], 3, 10,
+    )
+    assert result == [Segment("First.", 10, 11),
+                      Segment("Second. Last.", 11, 10 + min(tail_end, 3))]
+
+
+def test_collapsed_tail_preserves_unspaced_text():
+    result = aligned_segments(
+        "你好。世界。", [Word("你好", 0, 1), Word("世界", 1, 1)], 2, 0,
+    )
+    assert result == [Segment("你好。世界。", 0, 1)]
+
+
+def test_fully_collapsed_alignment_is_not_given_invented_duration():
+    with pytest.raises(TranscriptionError, match="no positive-duration"):
+        aligned_segments("One two", [Word("One", 1, 1), Word("two", 1, 1)], 3, 0)
+
+
 def test_time_format_carry_and_long_hours():
     assert format_time(59.9996) == "00:01:00.000"
     assert format_time(100 * 3600 + 61.08) == "100:01:01.080"

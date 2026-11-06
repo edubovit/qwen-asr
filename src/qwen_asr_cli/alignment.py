@@ -69,6 +69,7 @@ def aligned_segments(text: str, words: list[Word], duration: float, offset: floa
     segments = []
     first_word = 0
     text_start = 0
+    last_text_start = 0
     for i, word in enumerate(bounded):
         span = text[text_start : ends[i]].strip()
         elapsed = word.end - bounded[first_word].start
@@ -77,10 +78,21 @@ def aligned_segments(text: str, words: list[Word], duration: float, offset: floa
         pause = not last and bounded[i + 1].start - word.end >= 0.7
         if last or sentence_end or pause or elapsed >= 8 or i - first_word >= 19:
             if elapsed <= 0:
-                raise TranscriptionError(
-                    "Alignment produced a zero-length segment. Retry without --timestamps."
+                if not last:
+                    continue
+                if not segments:
+                    raise TranscriptionError(
+                        "Alignment produced no positive-duration segment. "
+                        "Retry without --timestamps."
+                    )
+                previous = segments[-1]
+                segments[-1] = Segment(
+                    text[last_text_start : ends[i]].strip(), previous.start,
+                    max(previous.end, offset + word.end),
                 )
+                continue
             segments.append(Segment(span, offset + bounded[first_word].start, offset + word.end))
+            last_text_start = text_start
             first_word = i + 1
             text_start = ends[i]
     return segments

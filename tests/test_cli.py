@@ -94,6 +94,28 @@ def test_silence_never_loads_model_or_invents_text(fake_pipeline, tmp_path, caps
     assert_clean(tmp_path)
 
 
+@pytest.mark.parametrize("timings,expected_end", [
+    ([(0.08, 0.08), (1.2, 1.4)], "01.400"),
+    ([(0.08, 1.2), (2.0, 2.0)], "02.000"),
+])
+def test_timestamps_publish_all_text_despite_collapsed_word(
+    fake_pipeline, tmp_path, monkeypatch, capsys, timings, expected_end
+):
+    source, _ = fake_pipeline
+    monkeypatch.setattr(
+        model.NativeQwen, "align",
+        lambda self, samples, transcript: [
+            Word(text, *times) for text, times in zip(["Привет", "world"], timings)
+        ],
+    )
+    assert cli.main([str(source), "--timestamps", "--offline"]) == 0
+    assert source.with_suffix(".txt").read_text(encoding="utf-8") == (
+        f"[00:00:00.080 --> 00:00:{expected_end}] Привет, world!\n"
+    )
+    assert capsys.readouterr().out == ""
+    assert_clean(tmp_path)
+
+
 @pytest.mark.parametrize("exception,code", [
     (KeyboardInterrupt(), 130), (TranscriptionError("generation cap"), 5),
     (ModelError("missing offline aligner"), 4),
